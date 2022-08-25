@@ -1,82 +1,183 @@
 #![no_std]
 
+mod impls;
+
 extern crate alloc;
 
 use alloc::borrow::Cow;
-use auto_impl::auto_impl;
 
 /// Merkle root alias type
 pub type MerkleRoot = [u8; 32];
 
-/// Base map trait for Fuel infrastructure
-///
-/// Generics:
-///
-/// - K: Key that maps to a value
-/// - V: Stored value
-#[auto_impl(&mut)]
-pub trait Storage<K, V>
-where
-    V: Clone,
-{
-    /// Error implementation of the storage functions
-    type Error;
-
-    /// Append `K->V` mapping to the storage.
+/// Mappable type with `Key` and `Value`.
+pub trait Mappable {
+    /// The type of the value's key.
+    type Key;
+    /// The value type is used while setting the value to the storage. In most cases, it is the same
+    /// as `Self::GetValue`, but it is without restriction and can be used for performance
+    /// optimizations.
     ///
-    /// If `K` was already mappped to a value, return the replaced value as `Ok(Some(V))`. Return
-    /// `Ok(None)` otherwise.
-    fn insert(&mut self, key: &K, value: &V) -> Result<Option<V>, Self::Error>;
-
-    /// Remove `K->V` mapping from the storage.
+    /// # Example
     ///
-    /// Return `Ok(Some(V))` if the value was present. If the key wasn't found, return
-    /// `Ok(None)`.
-    fn remove(&mut self, key: &K) -> Result<Option<V>, Self::Error>;
-
-    /// Retrieve `Cow<V>` such as `K->V`.
-    fn get<'a>(&'a self, key: &K) -> Result<Option<Cow<'a, V>>, Self::Error>;
-
-    /// Return `true` if there is a `K` mapping to a value in the storage.
-    fn contains_key(&self, key: &K) -> Result<bool, Self::Error>;
+    /// ```rust
+    /// use core::marker::PhantomData;
+    /// use fuel_storage::Mappable;
+    /// pub struct Contract<'a>(PhantomData<&'a ()>);
+    ///
+    /// impl<'a> Mappable for Contract<'a> {
+    ///     type Key = &'a [u8; 32];
+    ///     /// It is optimized to use slice instead of vector.
+    ///     type SetValue = [u8];
+    ///     type GetValue = Vec<u8>;
+    /// }
+    /// ```
+    type SetValue: ?Sized;
+    /// The value type is used while getting the value from the storage.
+    type GetValue: Clone;
 }
 
-/// Base trait for Fuel Merkle storage
-///
-/// Generics:
-///
-/// - P: Domain of the merkle tree
-/// - K: Key that maps to a value
-/// - V: Stored value
-#[auto_impl(&mut)]
-pub trait MerkleStorage<P, K, V>
-where
-    V: Clone,
-{
-    /// Error implementation of the merkle storage functions
+/// Trait describes used errors during work with `Storage` for the `Type`.
+pub trait StorageError<Type: Mappable> {
     type Error;
+}
 
-    /// Append `P->K->V` mapping to the storage.
+/// Base read storage trait for Fuel infrastructure.
+pub trait StorageInspect<Type: Mappable>: StorageError<Type> {
+    /// Retrieve `Cow<Value>` such as `Key->Value`.
+    fn get(&self, key: &Type::Key) -> Result<Option<Cow<Type::GetValue>>, Self::Error>;
+
+    /// Return `true` if there is a `Key` mapping to a value in the storage.
+    fn contains_key(&self, key: &Type::Key) -> Result<bool, Self::Error>;
+}
+
+/// Base write storage trait for Fuel infrastructure.
+pub trait StorageMutate<Type: Mappable>: StorageError<Type> {
+    /// Append `Key->Value` mapping to the storage.
     ///
-    /// If `K` was already mappped to a value, return the replaced value as `Ok(Some(V))`. Return
+    /// If `Key` was already mappped to a value, return the replaced value as `Ok(Some(Value))`. Return
     /// `Ok(None)` otherwise.
-    fn insert(&mut self, parent: &P, key: &K, value: &V) -> Result<Option<V>, Self::Error>;
+    fn insert(
+        &mut self,
+        key: &Type::Key,
+        value: &Type::SetValue,
+    ) -> Result<Option<Type::GetValue>, Self::Error>;
 
-    /// Remove `P->K->V` mapping from the storage.
+    /// Remove `Key->Value` mapping from the storage.
     ///
-    /// Return `Ok(Some(V))` if the value was present. If the key wasn't found, return
+    /// Return `Ok(Some(Value))` if the value was present. If the key wasn't found, return
     /// `Ok(None)`.
-    fn remove(&mut self, parent: &P, key: &K) -> Result<Option<V>, Self::Error>;
+    fn remove(&mut self, key: &Type::Key) -> Result<Option<Type::GetValue>, Self::Error>;
+}
 
-    /// Retrieve `Cow<V>` such as `P->K->V`.
-    fn get<'a>(&'a self, parent: &P, key: &K) -> Result<Option<Cow<'a, V>>, Self::Error>;
+/// Base storage trait for Fuel infrastructure.
+///
+/// Generic should implement [`Mappable`](crate::Mappable) trait with all storage type information.
+pub trait Storage<Type: Mappable>: StorageMutate<Type> + StorageInspect<Type> {}
 
-    /// Return `true` if there is a `P->K` mapping to a value in the storage.
-    fn contains_key(&self, parent: &P, key: &K) -> Result<bool, Self::Error>;
-
-    /// Return the merkle root of the domain of `P`.
+/// Returns the merkle root for the `StorageType` per merkle `Key`. The type should implement the
+/// `Storage` for the `StorageType`. Per one storage, it is possible to have several merkle trees
+/// under different `Key`.
+pub trait MerkleRootStorage<Key, StorageType>: Storage<StorageType>
+where
+    StorageType: Mappable,
+{
+    /// Return the merkle root of the stored `Type` in the `Storage`.
     ///
     /// The cryptographic primitive is an arbitrary choice of the implementor and this trait won't
     /// impose any restrictions to that.
-    fn root(&mut self, parent: &P) -> Result<MerkleRoot, Self::Error>;
+    fn root(&mut self, key: &Key) -> Result<MerkleRoot, Self::Error>;
+}
+
+/// The wrapper around the `Storage` that supports only methods from `StorageInspect`.
+pub struct StorageRef<'a, T: 'a + ?Sized, Type: Mappable>(&'a T, core::marker::PhantomData<Type>);
+
+/// Helper trait for `StorageInspect` to provide user-friendly API to retrieve storage as reference.
+///
+/// # Example
+///
+/// ```rust
+/// use fuel_storage::{Mappable, Storage, StorageAsRef};
+///
+/// pub struct Contracts;
+///
+/// impl Mappable for Contracts {
+///     type Key = [u8; 32];
+///     type SetValue = [u8];
+///     type GetValue = Vec<u8>;
+/// }
+///
+/// pub struct Balances;
+///
+/// impl Mappable for Balances {
+///     type Key = u128;
+///     type SetValue = u64;
+///     type GetValue = u64;
+/// }
+///
+/// pub trait Logic: Storage<Contracts> + Storage<Balances> {
+///     fn run(&self) {
+///         // You can specify which `Storage` do you want to call with `storage::<Type>()`
+///         let _ = self.storage::<Contracts>().get(&[0; 32]);
+///         let _ = self.storage::<Balances>().get(&123);
+///     }
+/// }
+/// ```
+pub trait StorageAsRef<Error> {
+    #[inline(always)]
+    fn storage<Type>(&self) -> StorageRef<Self, Type>
+    where
+        Self: StorageInspect<Type, Error = Error>,
+        Type: Mappable,
+    {
+        StorageRef(self, Default::default())
+    }
+}
+
+/// The wrapper around the `Storage` that supports methods from `StorageInspect` and `StorageMutate`.
+pub struct StorageMut<'a, T: 'a + ?Sized, Type: Mappable>(
+    &'a mut T,
+    core::marker::PhantomData<Type>,
+);
+
+/// Helper trait for `StorageMutate` to provide user-friendly API to retrieve storage as mutable reference.
+///
+/// # Example
+///
+/// ```rust
+/// use fuel_storage::{Mappable, Storage, StorageAsMut};
+///
+/// pub struct Contracts;
+///
+/// impl Mappable for Contracts {
+///     type Key = [u8; 32];
+///     type SetValue = [u8];
+///     type GetValue = Vec<u8>;
+/// }
+///
+/// pub struct Balances;
+///
+/// impl Mappable for Balances {
+///     type Key = u128;
+///     type SetValue = u64;
+///     type GetValue = u64;
+/// }
+///
+/// pub trait Logic: Storage<Contracts> + Storage<Balances> {
+///     fn run(&mut self) {
+///         let mut self_ = self;
+///         // You can specify which `Storage` do you want to call with `storage::<Type>()`
+///         let _ = self_.storage::<Balances>().insert(&123, &321);
+///         let _ = self_.storage::<Contracts>().get(&[0; 32]);
+///     }
+/// }
+/// ```
+pub trait StorageAsMut<Error> {
+    #[inline(always)]
+    fn storage<Type>(&mut self) -> StorageMut<Self, Type>
+    where
+        Self: Storage<Type, Error = Error>,
+        Type: Mappable,
+    {
+        StorageMut(self, Default::default())
+    }
 }
