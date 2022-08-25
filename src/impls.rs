@@ -105,7 +105,7 @@ impl<'a, T: Storage<Type>, Type: Mappable> StorageMut<'a, T, Type> {
     #[inline(always)]
     pub fn root<Key>(self, key: &Key) -> Result<MerkleRoot, T::Error>
     where
-        T: MerkleRootStorage<Key, Type>
+        T: MerkleRootStorage<Key, Type>,
     {
         self.0.root(key)
     }
