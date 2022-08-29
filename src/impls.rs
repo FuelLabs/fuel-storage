@@ -1,6 +1,6 @@
 use crate::{
-    Mappable, MerkleRoot, MerkleRootStorage, StorageAsMut, StorageAsRef,
-    StorageInspect, StorageMut, StorageMutate, StorageRef,
+    Mappable, MerkleRoot, MerkleRootStorage, StorageAsMut, StorageAsRef, StorageInspect,
+    StorageMut, StorageMutate, StorageRef,
 };
 use alloc::borrow::Cow;
 
