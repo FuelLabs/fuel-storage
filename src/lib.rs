@@ -36,13 +36,12 @@ pub trait Mappable {
     type GetValue: Clone;
 }
 
-/// Trait describes used errors during work with `Storage` for the `Type`.
-pub trait StorageError<Type: Mappable> {
-    type Error;
-}
-
 /// Base read storage trait for Fuel infrastructure.
-pub trait StorageInspect<Type: Mappable>: StorageError<Type> {
+///
+/// Generic should implement [`Mappable`] trait with all storage type information.
+pub trait StorageInspect<Type: Mappable> {
+    type Error;
+
     /// Retrieve `Cow<Value>` such as `Key->Value`.
     fn get(&self, key: &Type::Key) -> Result<Option<Cow<Type::GetValue>>, Self::Error>;
 
@@ -50,8 +49,10 @@ pub trait StorageInspect<Type: Mappable>: StorageError<Type> {
     fn contains_key(&self, key: &Type::Key) -> Result<bool, Self::Error>;
 }
 
-/// Base write storage trait for Fuel infrastructure.
-pub trait StorageMutate<Type: Mappable>: StorageError<Type> {
+/// Base storage trait for Fuel infrastructure.
+///
+/// Generic should implement [`Mappable`] trait with all storage type information.
+pub trait StorageMutate<Type: Mappable>: StorageInspect<Type> {
     /// Append `Key->Value` mapping to the storage.
     ///
     /// If `Key` was already mappped to a value, return the replaced value as `Ok(Some(Value))`. Return
@@ -69,26 +70,21 @@ pub trait StorageMutate<Type: Mappable>: StorageError<Type> {
     fn remove(&mut self, key: &Type::Key) -> Result<Option<Type::GetValue>, Self::Error>;
 }
 
-/// Base storage trait for Fuel infrastructure.
-///
-/// Generic should implement [`Mappable`](crate::Mappable) trait with all storage type information.
-pub trait Storage<Type: Mappable>: StorageMutate<Type> + StorageInspect<Type> {}
-
 /// Returns the merkle root for the `StorageType` per merkle `Key`. The type should implement the
-/// `Storage` for the `StorageType`. Per one storage, it is possible to have several merkle trees
+/// `StorageMutate` for the `StorageType`. Per one storage, it is possible to have several merkle trees
 /// under different `Key`.
-pub trait MerkleRootStorage<Key, StorageType>: Storage<StorageType>
+pub trait MerkleRootStorage<Key, StorageType>: StorageMutate<StorageType>
 where
     StorageType: Mappable,
 {
-    /// Return the merkle root of the stored `Type` in the `Storage`.
+    /// Return the merkle root of the stored `Type` in the storage.
     ///
     /// The cryptographic primitive is an arbitrary choice of the implementor and this trait won't
     /// impose any restrictions to that.
     fn root(&mut self, key: &Key) -> Result<MerkleRoot, Self::Error>;
 }
 
-/// The wrapper around the `Storage` that supports only methods from `StorageInspect`.
+/// The wrapper around the storage that supports only methods from `StorageInspect`.
 pub struct StorageRef<'a, T: 'a + ?Sized, Type: Mappable>(&'a T, core::marker::PhantomData<Type>);
 
 /// Helper trait for `StorageInspect` to provide user-friendly API to retrieve storage as reference.
@@ -96,7 +92,7 @@ pub struct StorageRef<'a, T: 'a + ?Sized, Type: Mappable>(&'a T, core::marker::P
 /// # Example
 ///
 /// ```rust
-/// use fuel_storage::{Mappable, Storage, StorageAsRef};
+/// use fuel_storage::{Mappable, StorageInspect, StorageAsRef};
 ///
 /// pub struct Contracts;
 ///
@@ -114,26 +110,25 @@ pub struct StorageRef<'a, T: 'a + ?Sized, Type: Mappable>(&'a T, core::marker::P
 ///     type GetValue = u64;
 /// }
 ///
-/// pub trait Logic: Storage<Contracts> + Storage<Balances> {
+/// pub trait Logic: StorageInspect<Contracts> + StorageInspect<Balances> {
 ///     fn run(&self) {
-///         // You can specify which `Storage` do you want to call with `storage::<Type>()`
+///         // You can specify which storage do you want to call with `storage::<Type>()`
 ///         let _ = self.storage::<Contracts>().get(&[0; 32]);
 ///         let _ = self.storage::<Balances>().get(&123);
 ///     }
 /// }
 /// ```
-pub trait StorageAsRef<Error> {
+pub trait StorageAsRef {
     #[inline(always)]
     fn storage<Type>(&self) -> StorageRef<Self, Type>
     where
-        Self: StorageInspect<Type, Error = Error>,
         Type: Mappable,
     {
         StorageRef(self, Default::default())
     }
 }
 
-/// The wrapper around the `Storage` that supports methods from `StorageInspect` and `StorageMutate`.
+/// The wrapper around the storage that supports methods from `StorageInspect` and `StorageMutate`.
 pub struct StorageMut<'a, T: 'a + ?Sized, Type: Mappable>(
     &'a mut T,
     core::marker::PhantomData<Type>,
@@ -144,7 +139,7 @@ pub struct StorageMut<'a, T: 'a + ?Sized, Type: Mappable>(
 /// # Example
 ///
 /// ```rust
-/// use fuel_storage::{Mappable, Storage, StorageAsMut};
+/// use fuel_storage::{Mappable, StorageMutate, StorageInspect, StorageAsMut};
 ///
 /// pub struct Contracts;
 ///
@@ -162,20 +157,19 @@ pub struct StorageMut<'a, T: 'a + ?Sized, Type: Mappable>(
 ///     type GetValue = u64;
 /// }
 ///
-/// pub trait Logic: Storage<Contracts> + Storage<Balances> {
+/// pub trait Logic: StorageInspect<Contracts> + StorageMutate<Balances> {
 ///     fn run(&mut self) {
 ///         let mut self_ = self;
-///         // You can specify which `Storage` do you want to call with `storage::<Type>()`
+///         // You can specify which storage do you want to call with `storage::<Type>()`
 ///         let _ = self_.storage::<Balances>().insert(&123, &321);
 ///         let _ = self_.storage::<Contracts>().get(&[0; 32]);
 ///     }
 /// }
 /// ```
-pub trait StorageAsMut<Error> {
+pub trait StorageAsMut {
     #[inline(always)]
     fn storage<Type>(&mut self) -> StorageMut<Self, Type>
     where
-        Self: Storage<Type, Error = Error>,
         Type: Mappable,
     {
         StorageMut(self, Default::default())

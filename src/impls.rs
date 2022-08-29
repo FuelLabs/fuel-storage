@@ -1,17 +1,12 @@
 use crate::{
-    Mappable, MerkleRoot, MerkleRootStorage, Storage, StorageAsMut, StorageAsRef, StorageError,
+    Mappable, MerkleRoot, MerkleRootStorage, StorageAsMut, StorageAsRef,
     StorageInspect, StorageMut, StorageMutate, StorageRef,
 };
 use alloc::borrow::Cow;
 
-impl<'a, T: StorageError<Type> + ?Sized, Type: Mappable> StorageError<Type> for &'a T {
-    type Error = T::Error;
-}
-impl<'a, T: StorageError<Type> + ?Sized, Type: Mappable> StorageError<Type> for &'a mut T {
-    type Error = T::Error;
-}
-
 impl<'a, T: StorageInspect<Type> + ?Sized, Type: Mappable> StorageInspect<Type> for &'a T {
+    type Error = T::Error;
+
     fn get(&self, key: &Type::Key) -> Result<Option<Cow<'_, Type::GetValue>>, Self::Error> {
         <T as StorageInspect<Type>>::get(self, key)
     }
@@ -22,6 +17,8 @@ impl<'a, T: StorageInspect<Type> + ?Sized, Type: Mappable> StorageInspect<Type> 
 }
 
 impl<'a, T: StorageInspect<Type> + ?Sized, Type: Mappable> StorageInspect<Type> for &'a mut T {
+    type Error = T::Error;
+
     fn get(&self, key: &Type::Key) -> Result<Option<Cow<'_, Type::GetValue>>, Self::Error> {
         <T as StorageInspect<Type>>::get(self, key)
     }
@@ -53,11 +50,9 @@ impl<'a, T: MerkleRootStorage<Key, Type> + ?Sized, Key, Type: Mappable> MerkleRo
     }
 }
 
-impl<T: StorageMutate<Type> + StorageInspect<Type>, Type: Mappable> Storage<Type> for T {}
+impl<'a, T> StorageAsRef for T {}
 
-impl<'a, T, Error> StorageAsRef<Error> for T {}
-
-impl<'a, T: StorageAsRef<Error>, Error> StorageAsMut<Error> for T {}
+impl<'a, T> StorageAsMut for T {}
 
 impl<'a, T: StorageInspect<Type>, Type: Mappable> StorageRef<'a, T, Type> {
     #[inline(always)]
@@ -101,7 +96,7 @@ impl<'a, T: StorageMutate<Type>, Type: Mappable> StorageMut<'a, T, Type> {
     }
 }
 
-impl<'a, T: Storage<Type>, Type: Mappable> StorageMut<'a, T, Type> {
+impl<'a, T: StorageMutate<Type>, Type: Mappable> StorageMut<'a, T, Type> {
     #[inline(always)]
     pub fn root<Key>(self, key: &Key) -> Result<MerkleRoot, T::Error>
     where
