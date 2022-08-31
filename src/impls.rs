@@ -1,5 +1,5 @@
 use crate::{
-    Mappable, MerkleRoot, MerkleRootStorage, StorageAsMut, StorageAsRef, StorageInspect,
+    Mappable, MerkleRoot, MerkleRootStorage, StorageInspect,
     StorageMut, StorageMutate, StorageRef,
 };
 use alloc::borrow::Cow;
@@ -49,10 +49,6 @@ impl<'a, T: MerkleRootStorage<Key, Type> + ?Sized, Key, Type: Mappable> MerkleRo
         <T as MerkleRootStorage<Key, Type>>::root(self, key)
     }
 }
-
-impl<'a, T> StorageAsRef for T {}
-
-impl<'a, T> StorageAsMut for T {}
 
 impl<'a, T: StorageInspect<Type>, Type: Mappable> StorageRef<'a, T, Type> {
     #[inline(always)]
