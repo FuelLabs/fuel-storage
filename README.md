@@ -1,3 +1,6 @@
+# ⚠ Archival Notice
+This repo is no longer active and has been moved to: https://github.com/FuelLabs/fuel-vm/tree/master/fuel-storage
+
 # Fuel Storage
 
 [![build](https://github.com/FuelLabs/fuel-storage/actions/workflows/ci.yml/badge.svg)](https://github.com/FuelLabs/fuel-storage/actions/workflows/ci.yml)
